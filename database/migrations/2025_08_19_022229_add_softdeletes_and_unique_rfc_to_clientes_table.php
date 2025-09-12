@@ -45,17 +45,40 @@ return new class extends Migration
 
     private function uniqueIndexExists(string $table, string $column): bool
     {
-        $dbName = DB::getDatabaseName();
-        $rows = DB::select("
-            SELECT 1
-            FROM information_schema.statistics
-            WHERE table_schema = ?
-              AND table_name   = ?
-              AND column_name  = ?
-              AND non_unique   = 0
-            LIMIT 1
-        ", [$dbName, $table, $column]);
-
-        return !empty($rows);
+        try {
+            $connection = DB::connection();
+            $driver = $connection->getDriverName();
+            
+            if ($driver === 'sqlite') {
+                // Para SQLite, verificar usando PRAGMA
+                $indexes = $connection->select("PRAGMA index_list({$table})");
+                foreach ($indexes as $index) {
+                    if ($index->unique) {
+                        $indexInfo = $connection->select("PRAGMA index_info({$index->name})");
+                        foreach ($indexInfo as $info) {
+                            if ($info->name === $column) {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                return false;
+            } else {
+                // Para MySQL y otros
+                $dbName = $connection->getDatabaseName();
+                $rows = $connection->select("
+                    SELECT 1
+                    FROM information_schema.statistics
+                    WHERE table_schema = ?
+                      AND table_name   = ?
+                      AND column_name  = ?
+                      AND non_unique   = 0
+                    LIMIT 1
+                ", [$dbName, $table, $column]);
+                return !empty($rows);
+            }
+        } catch (\Exception $e) {
+            return false;
+        }
     }
 };
